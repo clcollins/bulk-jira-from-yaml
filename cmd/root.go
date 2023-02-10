@@ -17,6 +17,7 @@ package cmd
 
 import (
 	"fmt"
+	"log"
 	"net/url"
 	"os"
 
@@ -43,7 +44,14 @@ var rootCmd = &cobra.Command{
 
 	// Uncomment the following line if your bare application
 	// has an action associated with it:
-	Run: func(cmd *cobra.Command, args []string) { jira.Run() },
+	RunE: func(cmd *cobra.Command, args []string) error {
+		err := jira.Run()
+		if err != nil {
+			log.Fatal(err)
+			return err
+		}
+		return err
+	},
 }
 
 // Execute adds all child commands to the root command and sets flags appropriately.
