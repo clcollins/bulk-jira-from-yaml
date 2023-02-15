@@ -2,7 +2,6 @@ package jira
 
 import (
 	"errors"
-	"fmt"
 	"io"
 	"io/ioutil"
 	"log"
@@ -16,6 +15,51 @@ import (
 )
 
 var apiPath string = "/rest/api/3"
+
+// link represents a single "outward" *jira.IssueLink{}
+// Outward links are from the current issue TO another issue
+// eg current issue -> depends on -> other issue
+type link struct {
+	LinksTo int    `json:"linksTo"`
+	Type    string `json:",inline"`
+}
+
+// issueSpec is a rough approximation of a jira issue, containing
+// a *jira.Issue "spec", with some or all of the standard fields,
+// a list of type link, and a SpecId which can be used to specify
+// targets for links before a real Jira issue has been created and
+// a real key (eg "PROJECT-##") has been created
+type issueSpec struct {
+	SpecId int         `json:"spec_id"`
+	Spec   *jira.Issue `json:",inline"`
+	Links  []link      `json:"links"`
+}
+
+// loadIssuesFromFile takes a file represented as a string
+// opens the file and reads it, returning an issue slice
+func loadIssuesFromFile(file string) ([]issueSpec, error) {
+	var issues []issueSpec
+
+	filename, err := filepath.Abs(file)
+
+	if err != nil {
+		return nil, err
+	}
+
+	data, err := ioutil.ReadFile(filename)
+
+	if err != nil {
+		return nil, err
+	}
+
+	err = yaml.UnmarshalStrict(data, &issues)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return issues, nil
+}
 
 // createClient returns a *jiraClient with transport
 // for the host specified in the application configuration
@@ -36,17 +80,6 @@ func createClient() (*jira.Client, error) {
 	return client, err
 }
 
-// whoAmI returns the *jira.User for the currently authenticated credentials
-func whoAmI(client *jira.Client) (*jira.User, error) {
-	user, response, err := client.User.GetSelf()
-	if err != nil {
-		printResponse(response)
-		return user, err
-	}
-
-	return user, err
-}
-
 // getProjects returns a *jira.Project by the project ID
 func getProjects(client *jira.Client, projectID string) (*jira.Project, error) {
 	project, response, err := client.Project.Get(projectID)
@@ -58,24 +91,24 @@ func getProjects(client *jira.Client, projectID string) (*jira.Project, error) {
 	return project, err
 }
 
-// getIssueById returns an issue from the specified project
+// getIssueBySpecId returns the *jira.Issue from the issue
+// list from the SpecId of the issue type (from the parsed yaml)
+// rather than the literal issue key
+func getIssueBySpecId(issues []issueSpec, specId int) *jira.Issue {
+	for _, issue := range issues {
+		if issue.SpecId == specId {
+			return issue.Spec
+		}
+	}
+
+	return nil
+}
+
+// getIssueById returns an issue pointer from the specified project
 func getIssueById(client *jira.Client, project *jira.Project, issueID string) (*jira.Issue, error) {
 	options := &jira.GetQueryOptions{}
 
 	issue, response, err := client.Issue.Get(issueID, options)
-	if err != nil {
-		printResponse(response)
-		return issue, err
-	}
-
-	return issue, err
-}
-
-// createIssue creates an issue from a spec
-// requires Browse projects and Create issues project permissions
-func createIssue(client *jira.Client, issueSpec *jira.Issue) (*jira.Issue, error) {
-	issue, response, err := client.Issue.Create(issueSpec)
-
 	if err != nil {
 		printResponse(response)
 		return issue, err
@@ -92,21 +125,7 @@ func printResponse(response *jira.Response) error {
 		return err
 	}
 
-	log.Println(string(bytes))
-
-	return err
-}
-
-// printIssueAsYaml prints a Jira issue to the terminal in YAML format
-func printIssueAsYaml(issue *jira.Issue) error {
-	out, err := yaml.Marshal(&issue)
-
-	if err != nil {
-		return err
-	}
-
-	fmt.Println("---")
-	fmt.Println(string(out))
+	pp.Println(string(bytes))
 
 	return err
 }
@@ -124,18 +143,11 @@ func Run(yamlFile string) error {
 		return err
 	}
 
-	user, err := whoAmI(client)
-	if err != nil {
-		return err
-	}
-	pp.Println(user)
-
 	for _, issue := range issues {
 		pp.Println(issue.SpecId)
 
 		i := &jira.Issue{
 			Fields: &jira.IssueFields{
-				//	Creator:     user,
 				Summary:     issue.Spec.Fields.Summary,
 				Description: issue.Spec.Fields.Description,
 				Project: jira.Project{
@@ -190,53 +202,4 @@ func Run(yamlFile string) error {
 
 	return nil
 
-}
-
-// getIssueBySpecId returns the *jira.Issue from the issue
-// list from the spec.Id
-func getIssueBySpecId(issues []issueSpec, specId int) *jira.Issue {
-	for _, issue := range issues {
-		if issue.SpecId == specId {
-			return issue.Spec
-		}
-	}
-
-	return nil
-}
-
-type link struct {
-	LinksTo int    `json:"linksTo"`
-	Type    string `json:",inline"`
-}
-
-type issueSpec struct {
-	SpecId int         `json:"spec_id"`
-	Spec   *jira.Issue `json:",inline"`
-	Links  []link      `json:"links"`
-}
-
-// loadIssuesFromFile takes a file represented as a string
-// opens the file and reads it, returning an issue slice
-func loadIssuesFromFile(file string) ([]issueSpec, error) {
-	var issues []issueSpec
-
-	filename, err := filepath.Abs(file)
-
-	if err != nil {
-		return nil, err
-	}
-
-	data, err := ioutil.ReadFile(filename)
-
-	if err != nil {
-		return nil, err
-	}
-
-	err = yaml.UnmarshalStrict(data, &issues)
-
-	if err != nil {
-		return nil, err
-	}
-
-	return issues, nil
 }
