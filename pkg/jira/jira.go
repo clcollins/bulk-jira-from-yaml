@@ -128,20 +128,32 @@ func Run(yamlFile string) error {
 	if err != nil {
 		return err
 	}
+	pp.Println(user)
 
 	for _, issue := range issues {
 		pp.Println(issue.SpecId)
 
-		issue.Spec.Fields.Creator = user
-
-		if (issue.Spec.Fields.Type == jira.IssueType{}) {
-			issue.Spec.Fields.Type = jira.IssueType{
-				Name: "Story",
-			}
+		i := &jira.Issue{
+			Fields: &jira.IssueFields{
+				//	Creator:     user,
+				Summary:     issue.Spec.Fields.Summary,
+				Description: issue.Spec.Fields.Description,
+				Project: jira.Project{
+					Key: issue.Spec.Fields.Project.Key,
+				},
+			},
 		}
 
-		issue.Spec.Fields.Labels = []string{
-			"offboarding",
+		if (issue.Spec.Fields.Type == jira.IssueType{}) {
+			i.Fields.Type = jira.IssueType{
+				Name: "Story",
+			}
+		} else {
+			i.Fields.Type = issue.Spec.Fields.Type
+		}
+
+		i.Fields.Labels = []string{
+			"off-boarding",
 		}
 
 		if issue.Links != nil {
@@ -154,7 +166,7 @@ func Run(yamlFile string) error {
 					InwardIssue:  getIssueBySpecId(issues, issue.SpecId),
 				}
 
-				issue.Spec.Fields.IssueLinks = append(issue.Spec.Fields.IssueLinks, l)
+				i.Fields.IssueLinks = append(i.Fields.IssueLinks, l)
 
 				// inward issues will be the Spec of this issue, but we
 				// must have an outward issue to link to
@@ -165,14 +177,12 @@ func Run(yamlFile string) error {
 
 		}
 
-		pp.Println(issue)
-
 		var response *jira.Response
-		issue.Spec, response, err = client.Issue.Create(issue.Spec)
+		i, response, err = client.Issue.Create(i)
 
 		if err != nil {
 			printResponse(response)
-			pp.Println(issue)
+			pp.Println(i)
 			return err
 		}
 
@@ -184,7 +194,7 @@ func Run(yamlFile string) error {
 
 // getIssueBySpecId returns the *jira.Issue from the issue
 // list from the spec.Id
-func getIssueBySpecId(issues []issue, specId int) *jira.Issue {
+func getIssueBySpecId(issues []issueSpec, specId int) *jira.Issue {
 	for _, issue := range issues {
 		if issue.SpecId == specId {
 			return issue.Spec
@@ -195,20 +205,20 @@ func getIssueBySpecId(issues []issue, specId int) *jira.Issue {
 }
 
 type link struct {
-	LinksTo int    `json:"linkTo"`
+	LinksTo int    `json:"linksTo"`
 	Type    string `json:",inline"`
 }
 
-type issue struct {
+type issueSpec struct {
 	SpecId int         `json:"spec_id"`
 	Spec   *jira.Issue `json:",inline"`
 	Links  []link      `json:"links"`
 }
 
-// loadIussesFromFile takes a file represented as a string
+// loadIssuesFromFile takes a file represented as a string
 // opens the file and reads it, returning an issue slice
-func loadIssuesFromFile(file string) ([]issue, error) {
-	var issues []issue
+func loadIssuesFromFile(file string) ([]issueSpec, error) {
+	var issues []issueSpec
 
 	filename, err := filepath.Abs(file)
 
@@ -222,7 +232,7 @@ func loadIssuesFromFile(file string) ([]issue, error) {
 		return nil, err
 	}
 
-	err = yaml.Unmarshal(data, &issues)
+	err = yaml.UnmarshalStrict(data, &issues)
 
 	if err != nil {
 		return nil, err
